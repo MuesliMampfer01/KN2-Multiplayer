@@ -12,18 +12,18 @@
 
 //Client sendet an Server
 typedef struct {
-    int move_dir; 
+    int move_dir; //Drei mögliche Inputs: -1(hoch), 1(runter), 0(nichts) 
 } ClientIn;
 
 //Server sendet an alle
 typedef struct {
-    float p1_y;
-    float p2_y;
+    float paddle1_y;
+    float paddle2_y;
     float ball_x;
     float ball_y;
     int score1;
     int score2;
     int status; //0 = Warten auf Spiele, 1 = Spiel läuft
-} Gamestate;
+} GameState;
 
 #endif

@@ -5,80 +5,146 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include "protocol.h"
 
-#define PORT 6767
-#define BUF_SIZE 1024
+int clients[MAX_CLIENTS];
+int client_count = 0;
+
+//Cleint rauswerfen und Queue aufrücken
+void rm_client(int idx) 
+{
+    close(clients[idx]);
+    for(int i = idx; i < client_count -1; i++)
+    {
+        clients[i] = clients[i + 1]; //Aufschieben der Clients    
+    }
+    client_count--;
+    printf("Client disconnected. Current Player/Spectator: %d/n", client_count);
+}
 
 int main() 
 {
-    int sockfd;
-    struct sockaddr_in srv_addr, cl_addr;
-    socklen_t cl_len = sizeof(cl_addr);
-    char buf[BUF_SIZE];
+    //Socket
+    int srv_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(srv_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)); //Erlaubt das direkte Nutzen des Ports, falls geschlossen wurde
 
-    //UDP Socket erstellen
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) 
+    struct sockaddr_in addr = {AF_INET, htons(PORT), INADDR_ANY};
+    bind(srv_fd, (struct sockaddr*)&addr, sizeof(addr));
+    socklen_t cl_len = sizeof(addr);
+    listen(srv_fd, MAX_CLIENTS);
+
+    printf("Server started on Port %d. Waiting for Players...\n", PORT);
+
+    //Startzustand
+    GameState state = 
     {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
-    }
+        SCREEN_HEIGHT/2.0f - PADDLE_HEIGHT/2.0f,
+        SCREEN_HEIGHT/2.0f - PADDLE_HEIGHT/2.0f,
+        SCREEN_WIDTH/2.0f, SCREEN_HEIGHT/2.0f,
+        0, 0, 0
+    };
 
-    //Server-Adresse konfigurieren
-    memset(&srv_addr, 0, sizeof(srv_addr));
-    srv_addr.sin_family = AF_INET;
-    srv_addr.sin_addr.s_addr = INADDR_ANY;
-    srv_addr.sin_port = htons(PORT);
+    float ball_dx = 5.0f, ball_dy = -5.0f;
+    float paddle_speed = 6.0f;
 
-    //Socket an Port binden
-    if (bind(sockfd, (const struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) 
+    while (1) 
     {
-        perror("bind failed");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(srv_fd, &read_fds); //Eingang im Auge behalten
+        int max_fd = srv_fd; //höchste ID-Nummer der Clients
 
-    printf("Server started on port %d\n", PORT);
-    printf("CRTL+C to stop the server\n\n");
-
-    //Main loop
-    while (1)
-    {
-        //Checklist für Sockets
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(sockfd, &readfds);
-
-        //kurzer Timeout für schnelle Antworten
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 10000;
-
-        //select(), zum schauen ob Pakete in Warteschlage sind
-        int activity = select(sockfd + 1, &readfds, NULL, NULL, &tv);
-
-        if (activity < 0) {
-            perror("select error");
-            break;
+        for (int i = 0; i < client_count; i++) 
+        {
+            FD_SET(clients[i], &read_fds); // Jeder Client kriegt ID
+            if (clients[i] > max_fd) max_fd = clients[i]; // Aktualisiert max, damit der Server nur bis dahin ausgeben muss (die folgenden sind leer)
         }
 
-        //Wenn > 0 dann ist Paket da
-        if (activity > 0 && FD_ISSET(sockfd, &readfds))
+        //60FPS Taktung
+        struct timeval tv = {0, 16666};
+        select(max_fd + 1, &read_fds, NULL, NULL, &tv); //select() blockt, mit tv wird gesichert, dass der Server auch bei keinem Input das Spiel weiter berechnet
+
+        if (FD_ISSET(srv_fd, &read_fds) && client_count < MAX_CLIENTS) //Neuen Client nach Check reinlassen
         {
-            //Paket annehmen
-            int n = recvfrom(sockfd, (char *)buf, BUF_SIZE - 1, 0, (struct sockaddr *)&cl_addr, &cl_len);
+            clients[client_count++] = accept(srv_fd, NULL, NULL); //Client auf Liste setzen
+        }
 
-            if (n > 0) 
+        //Inputs der Spieler verarbeiten
+        for (int i = 0; i < 2 && i < client_count; i++)
+        {
+            if (FD_ISSET(clients[i], &read_fds))
             {
-                buf[n] = '\0'; //String terminieren
+                ClientIn input;
+                int data = recv(clients[i], &input, sizeof(input), 0);
+                if (data <= 0)
+                {
+                    rm_client(i); //Spieler hat Fenster geschlossen
+                    continue;
+                }
 
-                //Ausgabe
-                printf("[Packet from %s:%d] %s\n", inet_ntoa(cl_addr.sin_addr), ntohs(cl_addr.sin_port), buf);
+                //Position berechnen
+                if (i == 0) { // 0 = Spieler 1 
+                    state.paddle1_y += input.move_dir * paddle_speed; //input (-1, 1, 0) * 6 = Einheiten in die Richtung
+                    if (state.paddle1_y < 0) state.paddle1_y = 0; //Decke ist Koordinate 0, damit paddle innerhalb des Spiels bleibt
+                    if (state.paddle1_y > SCREEN_HEIGHT - PADDLE_HEIGHT) state.paddle1_y = SCREEN_HEIGHT - PADDLE_HEIGHT; //Boden, gleiches Prinzip
+                } 
+                else //danach Spieler 2, andere Indexe kommen nicht dran, keine Berechtigung das zu steuern
+                {
+                    state.paddle2_y += input.move_dir * paddle_speed;
+                    if (state.paddle2_y < 0) state.paddle2_y = 0;
+                    if (state.paddle2_y > SCREEN_HEIGHT - PADDLE_HEIGHT) state.paddle2_y = SCREEN_HEIGHT - PADDLE_HEIGHT;
+                }
+            }
+        }
+
+        //Spiellogik (ausgeführt bei 2 oder mehr Spieler)
+        if (client_count >= 2) 
+        {
+            state.status = 1; //Spiel läuft+
+            state.ball_x += ball_dx; //Ball ins Bewegen bringen
+            state.ball_y += ball_dy;
+
+            //Wandkollision des Balls (oben/unten)
+            if (state.ball_y - BALL_RADIUS <= 0 || state.ball_y + BALL_RADIUS >= SCREEN_HEIGHT) ball_dy *= -1.0f;
+
+            //Paddle Kollision links
+            if (state.ball_x - BALL_RADIUS <= 30 + PADDLE_WIDTH && state.ball_y >= state.paddle1_y && state.ball_y >= state.paddle1_y + PADDLE_HEIGHT)
+            {
+                ball_dx *= -1.1f; state.ball_x = 30 + PADDLE_WIDTH + BALL_RADIUS;
+            }
+
+            //Paddle Kollision rechts
+            if (state.ball_x + BALL_RADIUS >= SCREEN_WIDTH - 30 - PADDLE_WIDTH && state.ball_y >= state.paddle2_y && state.ball_y <= state.paddle2_y + PADDLE_HEIGHT) 
+            {
+                ball_dx *= -1.1f; state.ball_x = SCREEN_WIDTH - 30 - PADDLE_WIDTH - BALL_RADIUS;
+            }
+
+            //Verloren
+            if (state.ball_x < 0) 
+            {
+                state.score2++;
+                printf("Player 1 (Left) lost. Player 1 will be kicked!\n");
+                rm_client(0); // P1 kicken, P2 wird P1, Zuschauer wird P2
+                state.ball_x = SCREEN_WIDTH/2.0f; ball_dx = 5.0f; ball_dy = 5.0f;
+            }
+            else if (state.ball_x > SCREEN_WIDTH) 
+            {
+                state.score1++;
+                printf("Spieler 2 (Rechts) hat verloren. Er wird gekickt!\n");
+                rm_client(1); // P2 kicken, Zuschauer rückt auf
+                state.ball_x = SCREEN_WIDTH/2.0f; ball_dx = -5.0f; ball_dy = 5.0f;
             }
         } 
-        
-        //TODO: GAME LOGIK
-    }
+        else
+        {
+            state.status = 0;
+        }
 
-    close(sockfd);
+        for (int i = 0; i < client_count; i++)
+        {
+            send(clients[i], &state, sizeof(state), MSG_NOSIGNAL);
+        }
+    }
     return 0;
 }
