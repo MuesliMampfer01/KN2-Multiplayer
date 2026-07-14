@@ -74,8 +74,8 @@ int main()
 
         for (int i = 0; i < client_count; i++) 
         {
-            FD_SET(clients[i], &read_fds); // Jeder Client kriegt ID
-            if (clients[i] > max_fd) max_fd = clients[i]; // Aktualisiert max, damit der Server nur bis dahin ausgeben muss (die folgenden sind leer)
+            FD_SET(clients[i], &read_fds); //Jeder Client kriegt ID
+            if (clients[i] > max_fd) max_fd = clients[i]; //Aktualisiert max, damit der Server nur bis dahin ausgeben muss (die folgenden sind leer)
         }
 
         //60FPS Taktung
@@ -88,25 +88,27 @@ int main()
         }
 
         //Inputs der Spieler verarbeiten
-        for (int i = 0; i < 2 && i < client_count; i++)
+        for (int i = 0; i < client_count; i++) 
         {
             if (FD_ISSET(clients[i], &read_fds))
             {
                 ClientIn input;
                 int data = recv(clients[i], &input, sizeof(input), 0);
+                
                 if (data <= 0)
                 {
-                    rm_client(i); //Spieler hat Fenster geschlossen
-                    continue;
+                    rm_client(i); //Jemand hat das Fenster geschlossen oder wurde gekickt
+                    break; 
                 }
 
-                //Position berechnen
-                if (i == 0) { // 0 = Spieler 1 
-                    state.paddle1_y += input.move_dir * paddle_speed; //input (-1, 1, 0) * 6 = Einheiten in die Richtung
-                    if (state.paddle1_y < 0) state.paddle1_y = 0; //Decke ist Koordinate 0, damit paddle innerhalb des Spiels bleibt
-                    if (state.paddle1_y > SCREEN_HEIGHT - PADDLE_HEIGHT) state.paddle1_y = SCREEN_HEIGHT - PADDLE_HEIGHT; //Boden, gleiches Prinzip
+                //Position berechnen (für die aktiven spieler)
+                if (i == 0) //Spieler 1 (Links)
+                { 
+                    state.paddle1_y += input.move_dir * paddle_speed; 
+                    if (state.paddle1_y < 0) state.paddle1_y = 0; 
+                    if (state.paddle1_y > SCREEN_HEIGHT - PADDLE_HEIGHT) state.paddle1_y = SCREEN_HEIGHT - PADDLE_HEIGHT; 
                 } 
-                else //danach Spieler 2, andere Indexe kommen nicht dran, keine Berechtigung das zu steuern
+                else if (i == 1) //Spieler 2 (Rechts)
                 {
                     state.paddle2_y += input.move_dir * paddle_speed;
                     if (state.paddle2_y < 0) state.paddle2_y = 0;
@@ -118,7 +120,7 @@ int main()
         //Spiellogik (ausgeführt bei 2 oder mehr Spieler)
         if (client_count >= 2) 
         {
-            state.status = 1; //Spiel läuft+
+            state.status = 1; //Spiel läuft
             state.ball_x += ball_dx; //Ball ins Bewegen bringen
             state.ball_y += ball_dy;
 
