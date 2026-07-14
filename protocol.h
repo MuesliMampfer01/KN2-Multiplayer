@@ -13,7 +13,7 @@
 //Client sendet an Server
 typedef struct {
     int move_dir; 
-} ClientIn
+} ClientIn;
 
 //Server sendet an alle
 typedef struct {
