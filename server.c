@@ -10,18 +10,35 @@
 int clients[MAX_CLIENTS];
 int client_count = 0;
 
-//Cleint rauswerfen und Queue aufrücken
+//Client rauswerfen und Queue aufrücken
 void rm_client(int idx) 
 {
     close(clients[idx]);
-    for(int i = idx; i < client_count -1; i++)
-    {
-        clients[i] = clients[i + 1]; //Aufschieben der Clients    
-    }
-    client_count--;
-    printf("Client disconnected. Current Player/Spectator: %d/n", client_count);
-}
 
+    //Wenn aktiver Spieler (0 oder 1) verliert und ein Zuschauer da ist
+    if (idx < 2 && client_count > 2) 
+    {
+        //Der erste Zuschauer (Index 2) kriegt den Platz des Verlierers
+        clients[idx] = clients[2]; 
+        
+        //Die restlichen Zuschauer rutschen einen Platz nach vorne
+        for (int i = 2; i < client_count - 1; i++) 
+        {
+            clients[i] = clients[i + 1];
+        }
+    } 
+    //Wenn Zuschauer geht oder ein Spieler geht und keiner zuschaut
+    else 
+    {
+        for (int i = idx; i < client_count - 1; i++) 
+        {
+            clients[i] = clients[i + 1]; 
+        }
+    }
+    
+    client_count--;
+    printf("Client disconnected. Current Player/Spectator: %d\n", client_count);
+}
 int main() 
 {
     //Socket
@@ -109,7 +126,7 @@ int main()
             if (state.ball_y - BALL_RADIUS <= 0 || state.ball_y + BALL_RADIUS >= SCREEN_HEIGHT) ball_dy *= -1.0f;
 
             //Paddle Kollision links
-            if (state.ball_x - BALL_RADIUS <= 30 + PADDLE_WIDTH && state.ball_y >= state.paddle1_y && state.ball_y >= state.paddle1_y + PADDLE_HEIGHT)
+            if (state.ball_x - BALL_RADIUS <= 30 + PADDLE_WIDTH && state.ball_y >= state.paddle1_y && state.ball_y <= state.paddle1_y + PADDLE_HEIGHT)
             {
                 ball_dx *= -1.1f; state.ball_x = 30 + PADDLE_WIDTH + BALL_RADIUS;
             }
@@ -120,20 +137,40 @@ int main()
                 ball_dx *= -1.1f; state.ball_x = SCREEN_WIDTH - 30 - PADDLE_WIDTH - BALL_RADIUS;
             }
 
-            //Verloren
+            //Punkt erzielt (Ball fliegt links oder rechts raus)
             if (state.ball_x < 0) 
             {
-                state.score2++;
-                printf("Player 1 (Left) lost. Player 1 will be kicked!\n");
-                rm_client(0); // P1 kicken, P2 wird P1, Zuschauer wird P2
-                state.ball_x = SCREEN_WIDTH/2.0f; ball_dx = 5.0f; ball_dy = 5.0f;
+                state.score2++; //Punkt für Spieler 2
+                //Ball in die Mitte zurücksetzen
+                state.ball_x = SCREEN_WIDTH / 2.0f; 
+                state.ball_y = SCREEN_HEIGHT / 2.0f;
+                ball_dx = 5.0f; 
+                ball_dy = 5.0f;
             }
             else if (state.ball_x > SCREEN_WIDTH) 
             {
-                state.score1++;
-                printf("Spieler 2 (Rechts) hat verloren. Er wird gekickt!\n");
-                rm_client(1); // P2 kicken, Zuschauer rückt auf
-                state.ball_x = SCREEN_WIDTH/2.0f; ball_dx = -5.0f; ball_dy = 5.0f;
+                state.score1++; //Punkt für Spieler 1
+                //Ball in die Mitte zurücksetzen
+                state.ball_x = SCREEN_WIDTH / 2.0f; 
+                state.ball_y = SCREEN_HEIGHT / 2.0f;
+                ball_dx = -5.0f; 
+                ball_dy = 5.0f;
+            }
+
+            //Matchende prüfen (Wer zuerst 5 Punkte hat, gewinnt)
+            if (state.score1 >= 5) 
+            {
+                printf("Player 1 won! Player 2 (right) will be kicked.\n");
+                rm_client(1); //Spieler 2 kicken, Zuschauer rückt auf
+                state.score1 = 0; //Punktestände für das neue Match zurücksetzen
+                state.score2 = 0;
+            } 
+            else if (state.score2 >= 5) 
+            {
+                printf("Player 2 won! Player 1 (left) will be kicked.\n");
+                rm_client(0); //Spieler 1 kicken, P2 wird P1, Zuschauer rückt auf
+                state.score1 = 0; //Punktestände für das neue Match zurücksetzen
+                state.score2 = 0;
             }
         } 
         else
